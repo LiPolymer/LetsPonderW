@@ -148,6 +148,7 @@ object PonderPackHandler {
                             rh.downloadFile(mi.modId, path, dp)
                             lf.files[path] = hash
                         }
+                        lpm.includedPonders[mi.modId]!!.hash = pi.hash
                     } else {
                         fp.files.forEach { (path, _) ->
                             rh.downloadFile(mi.modId, path, dp)
