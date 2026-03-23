@@ -1,24 +1,14 @@
 package ink.lipoly.modding.letsponderw
 
 import ink.lipoly.modding.letsponderw.Letsponderw.ID
-import kotlinx.coroutines.DelicateCoroutinesApi
-import kotlinx.coroutines.withContext
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.GlobalScope
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.*
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import net.minecraft.ChatFormatting
 import net.minecraft.SharedConstants
 import net.minecraft.client.Minecraft
-import net.minecraft.client.gui.components.toasts.SystemToast
 import net.minecraft.network.chat.Component
-import net.minecraft.server.packs.FilePackResources
-import net.minecraft.server.packs.PackLocationInfo
-import net.minecraft.server.packs.PackSelectionConfig
-import net.minecraft.server.packs.PackType
-import net.minecraft.server.packs.PathPackResources
+import net.minecraft.server.packs.*
 import net.minecraft.server.packs.repository.Pack
 import net.minecraft.server.packs.repository.PackSource
 import net.neoforged.fml.ModList
@@ -28,11 +18,8 @@ import org.apache.logging.log4j.LogManager
 import org.apache.logging.log4j.Logger
 import java.io.InputStream
 import java.nio.file.Path
-import java.nio.file.Paths
-import java.util.Optional
-import kotlin.io.path.div
-import kotlin.io.path.exists
-import kotlin.io.path.outputStream
+import java.util.*
+import kotlin.io.path.*
 
 object PonderPackHandler {
     val json = Json {
@@ -85,23 +72,13 @@ object PonderPackHandler {
         val apPath = modPath / "assembled"
         if (!apPath.exists()) apPath.toFile().mkdir()
         val packMetaFile = (apPath / "pack.mcmeta").toFile()
-        val packJsonFile = (apPath / "pack.json").toFile()
         val packIconPath = apPath / "pack.png"
         extractAssembleIcon(packIconPath)
         val packMeta = PackMeta(
             SharedConstants.getCurrentVersion().getPackVersion(PackType.CLIENT_RESOURCES),
             "Let's PonderW Assembled Resource")
-        val pondererMeta = PondererMeta(
-            "Let's PonderW Assembly",
-            "dynamic",
-            "All Contributors & LiPolymer",
-            "Let'sPw Assembled Ponderer pack"
-        )
         packMetaFile.writeText(json.encodeToString(
             ResourcePackMeta(packMeta)
-        ))
-        packJsonFile.writeText(json.encodeToString(
-            PondererPackMeta(packMeta, pondererMeta)
         ))
     }
     suspend fun assembleSuspend(modPath: Path): Boolean {
@@ -115,22 +92,26 @@ object PonderPackHandler {
             }
         }
     }
+
+    @OptIn(ExperimentalPathApi::class)
     fun assemble(modPath: Path) {
         Letsponderw.LOGGER.info("assemble process started")
         val allMods = ModList.get().mods
         val rh = PonderRepoHandler(REPO)
         val pri = rh.getIndex()
         var lpm = LocalPonderMeta(mutableMapOf())
+
         val lpf = (modPath / "assemble.json").toFile()
         val dp = modPath / "assembled" / "data" / "ponderer"
         if (lpf.exists()) lpm = json.decodeFromString(lpf.readText())
+
         allMods.forEach { mi ->
             Letsponderw.LOGGER.info("mod: ${mi.modId}")
             try {
                 if (pri.items.contains(mi.modId)) {
-                    val pi = pri.items[mi.modId] ?: return
+                    val pi = pri.items[mi.modId] ?: return@forEach
                     if (lpm.includedPonders.contains(mi.modId)
-                        && lpm.includedPonders[mi.modId]?.hash == pi.hash) return
+                        && lpm.includedPonders[mi.modId]?.hash == pi.hash) return@forEach
                     val fp = rh.getFragmentPonder(pi.pathway)
                     if (lpm.includedPonders.contains(mi.modId)) {
                         val lf = lpm.includedPonders[mi.modId]
@@ -160,7 +141,39 @@ object PonderPackHandler {
                 Letsponderw.LOGGER.error("something wrong", e)
             }
         }
-        Letsponderw.LOGGER.info("${lpm.includedPonders.count()} Ponderer fragment has been assembled")
+        Letsponderw.LOGGER.info("${lpm.includedPonders.count()} Ponderer fragment has been assembled, migrating...")
+
+        val pondererPath = FMLPaths.GAMEDIR.get() / "config" / "ponderer"
+        val registryItem = PondererRegistryItem()
+        val scriptPath = pondererPath / "scripts" / "_packs" / registryItem.name
+        val structuresPath = pondererPath / "structures" / "_packs" / registryItem.name
+        val scriptSource = dp / "scripts"
+        val structuresSource = dp / "structures"
+
+        val registryFile = (pondererPath / ".ponderer_registry.json").toFile()
+        val registry = json.decodeFromString<PondererRegistry>(registryFile.readText())
+        registry.packs[registryItem.name] = registryItem
+        registryFile.writeText(json.encodeToString(registry))
+
+        scriptPath.deleteRecursively()
+        structuresPath.deleteRecursively()
+
+        scriptPath.toFile().mkdir()
+        structuresPath.toFile().mkdir()
+
+        scriptSource.copyToRecursively(
+            scriptPath,
+            followLinks = true,
+            overwrite = true
+        )
+
+        structuresSource.copyToRecursively(
+            structuresPath,
+            followLinks = true,
+            overwrite = true
+        )
+
+        Letsponderw.LOGGER.info("migrated")
         lpf.writeText(json.encodeToString(lpm))
     }
     fun addAssembledLetsPonderPack(event: AddPackFindersEvent, modPath: Path) {
