@@ -7,6 +7,7 @@ import kotlinx.serialization.json.Json
 import net.minecraft.ChatFormatting
 import net.minecraft.SharedConstants
 import net.minecraft.client.Minecraft
+import net.minecraft.client.gui.components.toasts.SystemToast
 import net.minecraft.network.chat.Component
 import net.minecraft.server.packs.*
 import net.minecraft.server.packs.repository.Pack
@@ -40,15 +41,24 @@ object PonderPackHandler {
         }
         initAssembledLetsPonderPackMeta(folder)
         GlobalScope.launch {
-            val success = assembleSuspend(folder)
+            val reciept = assembleSuspend(folder)
             val client = Minecraft.getInstance()
-            if (success) {
+            if (reciept != -1) {
                 if (client.overlay == null) {
                     client.execute {
                         client.reloadResourcePacks()
                     }
+                    while (client.overlay != null) delay(500)
                 }
-                while (client.overlay != null) delay(500)
+                client.toasts.addToast(
+                    SystemToast(
+                        SystemToast.SystemToastId(3000L),
+                        Component.literal("Let's PonderW 已加载")
+                            .withStyle(ChatFormatting.GREEN, ChatFormatting.BOLD),
+                        Component.literal("载入 $reciept 个思索碎块")
+                            .withStyle(ChatFormatting.WHITE)
+                    )
+                )
             }
         }
         addAssembledLetsPonderPack(event, folder)
@@ -81,20 +91,19 @@ object PonderPackHandler {
             ResourcePackMeta(packMeta)
         ))
     }
-    suspend fun assembleSuspend(modPath: Path): Boolean {
-        return withContext(Dispatchers.Default) {
+    suspend fun assembleSuspend(modPath: Path): Int {
+        return withContext(Dispatchers.IO) {
             try {
                 assemble(modPath)
-                true
             } catch (e: Exception) {
                 Letsponderw.LOGGER.error(e)
-                false
+                -1
             }
         }
     }
 
     @OptIn(ExperimentalPathApi::class)
-    fun assemble(modPath: Path) {
+    fun assemble(modPath: Path): Int {
         Letsponderw.LOGGER.info("assemble process started")
         val allMods = ModList.get().mods
         val rh = PonderRepoHandler(REPO)
@@ -175,6 +184,7 @@ object PonderPackHandler {
 
         Letsponderw.LOGGER.info("migrated")
         lpf.writeText(json.encodeToString(lpm))
+        return lpm.includedPonders.count()
     }
     fun addAssembledLetsPonderPack(event: AddPackFindersEvent, modPath: Path) {
         val apPath = modPath / "assembled"
