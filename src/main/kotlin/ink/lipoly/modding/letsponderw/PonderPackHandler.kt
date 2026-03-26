@@ -49,16 +49,26 @@ object PonderPackHandler {
                         client.reloadResourcePacks()
                     }
                     while (client.overlay != null) delay(500)
-                }
-                client.toasts.addToast(
-                    SystemToast(
-                        SystemToast.SystemToastId(3000L),
-                        Component.literal("Let's PonderW 已加载")
-                            .withStyle(ChatFormatting.GREEN, ChatFormatting.BOLD),
-                        Component.literal("载入 $reciept 个思索碎块")
-                            .withStyle(ChatFormatting.WHITE)
+                    client.toasts.addToast(
+                        SystemToast(
+                            SystemToast.SystemToastId(10000L),
+                            Component.literal("Let's PonderW 已加载 [$reciept]")
+                                .withStyle(ChatFormatting.GREEN, ChatFormatting.BOLD),
+                            Component.literal("您可能需要在 Ponderer 重载思索")
+                                .withStyle(ChatFormatting.WHITE)
+                        )
                     )
-                )
+                } else {
+                    client.toasts.addToast(
+                        SystemToast(
+                            SystemToast.SystemToastId(3000L),
+                            Component.literal("Let's PonderW 已加载")
+                                .withStyle(ChatFormatting.GREEN, ChatFormatting.BOLD),
+                            Component.literal("载入 $reciept 个思索碎块")
+                                .withStyle(ChatFormatting.WHITE)
+                        )
+                    )
+                }
             }
         }
         addAssembledLetsPonderPack(event, folder)
