@@ -29,11 +29,16 @@ object PonderPackHandler {
         ignoreUnknownKeys = true
     }
 
-    // 这下面应该至少有个 index.json（吧?
-    const val REPO = "https://gitlab.com/LiPolymer/LetsPonderWIndex/-/raw/main"
+    var config : LetsPonderWConfig? = null
 
     @OptIn(DelicateCoroutinesApi::class)
     fun onAddPackFinders(event: AddPackFindersEvent) {
+        val cfgPath = FMLPaths.CONFIGDIR.get() / "letsPonderW.json"
+        if (cfgPath.toFile().exists()) config = json.decodeFromString(cfgPath.readText())
+        if (config == null) config = LetsPonderWConfig()
+        cfgPath.writeText(json.encodeToString(config))
+        if (config!!.repository == null) config!!.repository = "https://gitlab.com/LiPolymer/LetsPonderWIndex/-/raw/main"
+
         if (event.packType != PackType.CLIENT_RESOURCES) return
         val folder = FMLPaths.GAMEDIR.get() / "letsPonder"
         if (!folder.toFile().exists()) {
@@ -41,9 +46,9 @@ object PonderPackHandler {
         }
         initAssembledLetsPonderPackMeta(folder)
         GlobalScope.launch {
-            val reciept = assembleSuspend(folder)
+            val receipt = assembleSuspend(folder)
             val client = Minecraft.getInstance()
-            if (reciept != -1) {
+            if (receipt != -1) {
                 if (client.overlay == null) {
                     client.execute {
                         client.reloadResourcePacks()
@@ -52,19 +57,19 @@ object PonderPackHandler {
                     client.toasts.addToast(
                         SystemToast(
                             SystemToast.SystemToastId(10000L),
-                            Component.literal("Let's PonderW 已加载 [$reciept]")
+                            Component.literal("Let's PonderW 已加载 [$receipt]")
                                 .withStyle(ChatFormatting.GREEN, ChatFormatting.BOLD),
                             Component.literal("您可能需要在 Ponderer 重载思索")
                                 .withStyle(ChatFormatting.WHITE)
                         )
                     )
-                } else {
+                } else if (config!!.normalToast) {
                     client.toasts.addToast(
                         SystemToast(
                             SystemToast.SystemToastId(3000L),
                             Component.literal("Let's PonderW 已加载")
                                 .withStyle(ChatFormatting.GREEN, ChatFormatting.BOLD),
-                            Component.literal("载入 $reciept 个思索碎块")
+                            Component.literal("载入 $receipt 个思索碎块")
                                 .withStyle(ChatFormatting.WHITE)
                         )
                     )
@@ -114,54 +119,57 @@ object PonderPackHandler {
 
     @OptIn(ExperimentalPathApi::class)
     fun assemble(modPath: Path): Int {
-        Letsponderw.LOGGER.info("assemble process started")
-        val allMods = ModList.get().mods
-        val rh = PonderRepoHandler(REPO)
-        val pri = rh.getIndex()
-        var lpm = LocalPonderMeta(mutableMapOf())
-
-        val lpf = (modPath / "assemble.json").toFile()
         val dp = modPath / "assembled" / "data" / "ponderer"
+        var lpm = LocalPonderMeta(mutableMapOf())
+        val lpf = (modPath / "assemble.json").toFile()
         if (lpf.exists()) lpm = json.decodeFromString(lpf.readText())
+        if (!config!!.onlyLoad) {
+            Letsponderw.LOGGER.info("assemble process started")
+            val allMods = ModList.get().mods
+            val rh = PonderRepoHandler(config!!.repository!!)
+            val pri = rh.getIndex()
 
-        allMods.forEach { mi ->
-            Letsponderw.LOGGER.info("mod: ${mi.modId}")
-            try {
-                if (pri.items.contains(mi.modId)) {
-                    val pi = pri.items[mi.modId] ?: return@forEach
-                    if (lpm.includedPonders.contains(mi.modId)
-                        && lpm.includedPonders[mi.modId]?.hash == pi.hash) return@forEach
-                    val fp = rh.getFragmentPonder(pi.pathway)
-                    if (lpm.includedPonders.contains(mi.modId)) {
-                        val lf = lpm.includedPonders[mi.modId]
-                        lf!!.files.toMap().forEach { (path, hash) ->
-                            Letsponderw.LOGGER.info("file: $path")
-                            if (fp.files.contains(path)) {
-                                if (fp.files[path] == hash) fp.files.remove(path)
-                                else {
-                                    (dp / path).toFile().delete()
-                                    lf.files.remove(path)
-                                }
-                            } else (dp / path).toFile().delete()
+            allMods.forEach { mi ->
+                Letsponderw.LOGGER.info("mod: ${mi.modId}")
+                try {
+                    if (pri.items.contains(mi.modId)) {
+                        val pi = pri.items[mi.modId] ?: return@forEach
+                        if (lpm.includedPonders.contains(mi.modId)
+                            && lpm.includedPonders[mi.modId]?.hash == pi.hash
+                        ) return@forEach
+                        val fp = rh.getFragmentPonder(pi.pathway)
+                        if (lpm.includedPonders.contains(mi.modId)) {
+                            val lf = lpm.includedPonders[mi.modId]
+                            lf!!.files.toMap().forEach { (path, hash) ->
+                                Letsponderw.LOGGER.info("file: $path")
+                                if (fp.files.contains(path)) {
+                                    if (fp.files[path] == hash) fp.files.remove(path)
+                                    else {
+                                        (dp / path).toFile().delete()
+                                        lf.files.remove(path)
+                                    }
+                                } else (dp / path).toFile().delete()
+                            }
+                            fp.files.forEach { (path, hash) ->
+                                rh.downloadFile(mi.modId, path, dp)
+                                lf.files[path] = hash
+                            }
+                            lpm.includedPonders[mi.modId]!!.hash = pi.hash
+                        } else {
+                            fp.files.forEach { (path, _) ->
+                                rh.downloadFile(mi.modId, path, dp)
+                            }
+                            lpm.includedPonders[mi.modId] = LocalPonderMetaItem(pi.hash, fp.files)
                         }
-                        fp.files.forEach { (path, hash) ->
-                            rh.downloadFile(mi.modId, path, dp)
-                            lf.files[path] = hash
-                        }
-                        lpm.includedPonders[mi.modId]!!.hash = pi.hash
-                    } else {
-                        fp.files.forEach { (path, _) ->
-                            rh.downloadFile(mi.modId, path, dp)
-                        }
-                        lpm.includedPonders[mi.modId] = LocalPonderMetaItem(pi.hash, fp.files)
                     }
+                } catch (e: Exception) {
+                    Letsponderw.LOGGER.error("something wrong", e)
                 }
-            } catch (e: Exception) {
-                Letsponderw.LOGGER.error("something wrong", e)
             }
+            Letsponderw.LOGGER.info("${lpm.includedPonders.count()} Ponderer fragment has been assembled")
         }
-        Letsponderw.LOGGER.info("${lpm.includedPonders.count()} Ponderer fragment has been assembled, migrating...")
 
+        Letsponderw.LOGGER.info("migrating...")
         val pondererPath = FMLPaths.GAMEDIR.get() / "config" / "ponderer"
         val registryItem = PondererRegistryItem()
         val scriptPath = pondererPath / "scripts" / "_packs" / registryItem.name
