@@ -172,8 +172,8 @@ object PonderPackHandler {
         Letsponderw.LOGGER.info("migrating...")
         val pondererPath = FMLPaths.GAMEDIR.get() / "config" / "ponderer"
         val registryItem = PondererRegistryItem()
-        val scriptPath = pondererPath / "scripts" / "_packs" / registryItem.name
-        val structuresPath = pondererPath / "structures" / "_packs" / registryItem.name
+        val scriptPath = pondererPath / "_packs" / registryItem.name / "scripts"
+        val structuresPath = pondererPath / "_packs" / registryItem.name / "structures"
         val scriptSource = dp / "scripts"
         val structuresSource = dp / "structures"
 
@@ -185,8 +185,8 @@ object PonderPackHandler {
         scriptPath.deleteRecursively()
         structuresPath.deleteRecursively()
 
-        scriptPath.toFile().mkdir()
-        structuresPath.toFile().mkdir()
+        scriptPath.createDirectories()
+        structuresPath.createDirectories()
 
         scriptSource.copyToRecursively(
             scriptPath,
