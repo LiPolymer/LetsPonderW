@@ -19,8 +19,12 @@ import org.apache.logging.log4j.LogManager
 import org.apache.logging.log4j.Logger
 import java.io.InputStream
 import java.nio.file.Path
+import java.security.MessageDigest
 import java.util.*
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
 import kotlin.io.path.*
+import kotlin.time.Duration.Companion.milliseconds
 
 object PonderPackHandler {
     val json = Json {
@@ -53,7 +57,7 @@ object PonderPackHandler {
                     client.execute {
                         client.reloadResourcePacks()
                     }
-                    while (client.overlay != null) delay(500)
+                    while (client.overlay != null) delay(500.milliseconds)
                     client.toasts.addToast(
                         SystemToast(
                             SystemToast.SystemToastId(10000L),
@@ -76,8 +80,8 @@ object PonderPackHandler {
                 }
             }
         }
-        addAssembledLetsPonderPack(event, folder)
-        addDownloadedPondererPacks(event, folder)
+        //addAssembledLetsPonderPack(event, folder)
+        //addDownloadedPondererPacks(event, folder)
     }
 
     fun extractAssembleIcon(target: Path) {
@@ -96,16 +100,34 @@ object PonderPackHandler {
     fun initAssembledLetsPonderPackMeta(modPath: Path) {
         val apPath = modPath / "assembled"
         if (!apPath.exists()) apPath.toFile().mkdir()
-        val packMetaFile = (apPath / "pack.mcmeta").toFile()
+        val packMetaPath = apPath / "pack.mcmeta"
+        val ponderMetaPath = apPath / "pack.json"
         val packIconPath = apPath / "pack.png"
         extractAssembleIcon(packIconPath)
         val packMeta = PackMeta(
             SharedConstants.getCurrentVersion().getPackVersion(PackType.CLIENT_RESOURCES),
             "Let's PonderW Assembled Resource")
-        packMetaFile.writeText(json.encodeToString(
+        packMetaPath.writeText(json.encodeToString(
             ResourcePackMeta(packMeta)
         ))
+        //ponderMetaPath.deleteIfExists()
+        ponderMetaPath.writeText(json.encodeToString(
+            PondererPackMeta(packMeta,
+                PondererMeta("lets_ponder_w",
+                    (modPath / "assemble.json").md5().substring(0,5),
+                    "All Contributors",
+                    "Let's PonderW Assembled Ponder")
+            )
+        ))
     }
+
+    @OptIn(ExperimentalStdlibApi::class)
+    fun Path.md5(): String {
+        val md = MessageDigest.getInstance("MD5")
+        val digest = md.digest(this.readBytes())
+        return digest.toHexString()
+    }
+
     suspend fun assembleSuspend(modPath: Path): Int {
         return withContext(Dispatchers.IO) {
             try {
@@ -117,9 +139,9 @@ object PonderPackHandler {
         }
     }
 
-    @OptIn(ExperimentalPathApi::class)
     fun assemble(modPath: Path): Int {
-        val dp = modPath / "assembled" / "data" / "ponderer"
+        val das = modPath / "assembled"
+        val dp = das / "data" / "ponderer"
         var lpm = LocalPonderMeta(mutableMapOf())
         val lpf = (modPath / "assemble.json").toFile()
         if (lpf.exists()) lpm = json.decodeFromString(lpf.readText())
@@ -169,41 +191,32 @@ object PonderPackHandler {
             Letsponderw.LOGGER.info("${lpm.includedPonders.count()} Ponderer fragment has been assembled")
         }
 
-        Letsponderw.LOGGER.info("migrating...")
-        val pondererPath = FMLPaths.GAMEDIR.get() / "config" / "ponderer"
-        val registryItem = PondererRegistryItem()
-        val scriptPath = pondererPath / "_packs" / registryItem.name / "scripts"
-        val structuresPath = pondererPath / "_packs" / registryItem.name / "structures"
-        val scriptSource = dp / "scripts"
-        val structuresSource = dp / "structures"
+        Letsponderw.LOGGER.info("deploying...")
+        val zipDest = FMLPaths.GAMEDIR.get() / "resourcepacks" / "letsPonderW_assembled.zip"
+        zipDest.deleteIfExists()
+        das.zipDirectory(zipDest)
+        Letsponderw.LOGGER.info("deployed.")
 
-        val registryFile = (pondererPath / ".ponderer_registry.json").toFile()
-        val registry = json.decodeFromString<PondererRegistry>(registryFile.readText())
-        registry.packs[registryItem.name] = registryItem
-        registryFile.writeText(json.encodeToString(registry))
-
-        scriptPath.deleteRecursively()
-        structuresPath.deleteRecursively()
-
-        scriptPath.createDirectories()
-        structuresPath.createDirectories()
-
-        scriptSource.copyToRecursively(
-            scriptPath,
-            followLinks = true,
-            overwrite = true
-        )
-
-        structuresSource.copyToRecursively(
-            structuresPath,
-            followLinks = true,
-            overwrite = true
-        )
-
-        Letsponderw.LOGGER.info("migrated")
         lpf.writeText(json.encodeToString(lpm))
         return lpm.includedPonders.count()
     }
+
+    private fun Path.zipDirectory(zip: Path) {
+        ZipOutputStream(zip.outputStream()).use { zos ->
+            toFile().walkTopDown().forEach { file ->
+                if (file == toFile()) return@forEach
+                val entryName = file.relativeTo(toFile()).toPath().invariantSeparatorsPathString
+                if (file.isDirectory) {
+                    zos.putNextEntry(ZipEntry("$entryName/"))
+                } else {
+                    zos.putNextEntry(ZipEntry(entryName))
+                    file.inputStream().use { it.copyTo(zos) }
+                }
+                zos.closeEntry()
+            }
+        }
+    }
+
     fun addAssembledLetsPonderPack(event: AddPackFindersEvent, modPath: Path) {
         val apPath = modPath / "assembled"
         if (!apPath.toFile().exists()) return
